@@ -1,8 +1,8 @@
 import sqlite3
+import os
 import streamlit as st
 from duckduckgo_search import DDGS
 
-# --- DATABASE SETUP & SEEDING ---
 DB_NAME = 'partners.db'
 
 def get_db():
@@ -11,53 +11,53 @@ def get_db():
 def init_db():
     conn = get_db()
     c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS partners (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            industry TEXT,
-            priority TEXT,
-            status TEXT,
-            notes TEXT
-        )
-    ''')
-    conn.commit()
-    
-    # Auto-populate seed data if empty
-    c.execute('SELECT COUNT(*) FROM partners')
-    if c.fetchone()[0] == 0:
-        seed_data = [
-            ("Apex Solutions", "Enterprise Software", "High", "Prospect", "Discovered via web search for SaaS integration."),
-            ("Nexus Systems", "Cloud Infrastructure", "High", "Outreach Sent", "Sent initial partnership inquiry email."),
-            ("Quantum Analytics", "Data & AI", "Medium", "In Discussion", "Scheduled follow-up demo call."),
-            ("Vanguard Labs", "Cybersecurity", "Low", "Prospect", "Potential co-marketing partner.")
-        ]
-        c.executemany('''
-            INSERT INTO partners (name, industry, priority, status, notes)
-            VALUES (?, ?, ?, ?, ?)
-        ''', seed_data)
+    try:
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS partners (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                industry TEXT,
+                priority TEXT,
+                status TEXT,
+                notes TEXT
+            )
+        ''')
         conn.commit()
+        
+        c.execute('SELECT COUNT(*) FROM partners')
+        if c.fetchone()[0] == 0:
+            seed_data = [
+                ("Apex Solutions", "Enterprise Software", "High", "Prospect", "Discovered via web search for SaaS integration."),
+                ("Nexus Systems", "Cloud Infrastructure", "High", "Outreach Sent", "Sent initial partnership inquiry email."),
+                ("Quantum Analytics", "Data & AI", "Medium", "In Discussion", "Scheduled follow-up demo call."),
+                ("Vanguard Labs", "Cybersecurity", "Low", "Prospect", "Potential co-marketing partner.")
+            ]
+            c.executemany('''
+                INSERT INTO partners (name, industry, priority, status, notes)
+                VALUES (?, ?, ?, ?, ?)
+            ''', seed_data)
+            conn.commit()
+    except sqlite3.OperationalError:
+        conn.close()
+        if os.path.exists(DB_NAME):
+            os.remove(DB_NAME)
+        return init_db()
+    
     conn.close()
 
 def reset_db():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('DROP TABLE IF EXISTS partners')
-    conn.commit()
-    conn.close()
+    if os.path.exists(DB_NAME):
+        os.remove(DB_NAME)
     init_db()
 
-# Initialize DB on load
+# Initialize DB on startup
 init_db()
 
 # --- STREAMLIT UI ---
 st.set_page_config(page_title="Partner Intelligence", page_icon="🤝", layout="wide")
 
-# Sidebar Navigation
 st.sidebar.title("🤝 Partner Intelligence")
 st.sidebar.caption("Workspace for Business Development")
-
-# Web Discovery Status Indicator
 st.sidebar.success("🌐 Web Discovery: DuckDuckGo\n(Free / No Key Required)")
 
 nav = st.sidebar.radio("Navigation", ["Dashboard", "Find Partners", "All Partners", "Pipeline Board"])
@@ -69,7 +69,6 @@ if st.sidebar.button("🔄 Reset / Reload Sample Data"):
     st.sidebar.success("Database reset with fresh sample data!")
     st.rerun()
 
-# --- PAGES ---
 conn = get_db()
 c = conn.cursor()
 
@@ -88,7 +87,7 @@ if nav == "Dashboard":
 
 elif nav == "Find Partners":
     st.title("🔍 Find Partners (DuckDuckGo)")
-    query = st.text_input("Enter search query (e.g., 'Top AI Startups in Healthcare')", "Top B2B SaaS Startups")
+    query = st.text_input("Enter search query", "Top B2B SaaS Startups")
     
     if st.button("Search Web"):
         with st.spinner("Searching..."):
@@ -110,7 +109,7 @@ elif nav == "All Partners":
     if rows:
         st.table([{"Name": r[0], "Industry": r[1], "Priority": r[2], "Status": r[3], "Notes": r[4]} for r in rows])
     else:
-        st.info("No partners found. Use the sidebar to reload sample data!")
+        st.info("No partners found. Use the sidebar button to load sample data.")
 
 elif nav == "Pipeline Board":
     st.title("📌 Pipeline Board")
@@ -125,6 +124,6 @@ elif nav == "Pipeline Board":
             st.subheader(s)
             matching = [r for r in rows if r[2] == s]
             for m in matching:
-                st.card if hasattr(st, "card") else st.write(f"**{m[0]}** ({m[1]} Priority)")
+                st.write(f"**{m[0]}** ({m[1]} Priority)")
 
 conn.close()
