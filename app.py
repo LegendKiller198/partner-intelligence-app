@@ -92,14 +92,37 @@ elif nav == "Find Partners":
     if st.button("Search Web"):
         with st.spinner("Searching..."):
             try:
-                results = list(DDGS().text(query, max_results=5))
-                for r in results:
-                    st.subheader(r['title'])
-                    st.write(r['body'])
-                    st.caption(r['href'])
-                    st.markdown("---")
+                st.session_state['search_results'] = list(DDGS().text(query, max_results=5))
             except Exception as e:
                 st.error(f"Search error: {e}")
+
+    # Display cached results so forms/buttons work seamlessly on click
+    if 'search_results' in st.session_state and st.session_state['search_results']:
+        st.write("---")
+        for idx, r in enumerate(st.session_state['search_results']):
+            st.subheader(r['title'])
+            st.write(r['body'])
+            st.caption(f"URL: {r['href']}")
+            
+            # Interactive Save Section
+            with st.expander("➕ Add to Pipeline Database"):
+                with st.form(key=f"add_search_form_{idx}"):
+                    p_name = st.text_input("Partner Name", value=r['title'][:50])
+                    p_industry = st.text_input("Industry", value="Tech / General")
+                    p_priority = st.selectbox("Priority", ["High", "Medium", "Low"], index=0)
+                    p_status = st.selectbox("Pipeline Status", ["Prospect", "Outreach Sent", "In Discussion"], index=0)
+                    p_notes = st.text_area("Notes", value=f"Discovered via search: {r['href']}\n\nSummary: {r['body']}")
+                    
+                    save_btn = st.form_submit_button("Save Partner")
+                    if save_btn:
+                        c.execute('''
+                            INSERT INTO partners (name, industry, priority, status, notes)
+                            VALUES (?, ?, ?, ?, ?)
+                        ''', (p_name.strip(), p_industry.strip(), p_priority, p_status, p_notes.strip()))
+                        conn.commit()
+                        st.success(f"Saved **{p_name}** into SQLite database!")
+
+            st.markdown("---")
 
 elif nav == "All Partners":
     st.title("📋 All Partners")
@@ -131,7 +154,6 @@ elif nav == "Manage Partners":
     
     tab_add, tab_edit, tab_delete = st.tabs(["➕ Add New Partner", "✏️ Edit Partner Status", "🗑️ Delete Partner"])
     
-    # --- CREATE (ADD) ---
     with tab_add:
         st.subheader("Add a New Partner")
         with st.form("add_partner_form", clear_on_submit=True):
@@ -154,7 +176,6 @@ elif nav == "Manage Partners":
                     st.success(f"Added **{new_name}** to partners!")
                     st.rerun()
 
-    # --- UPDATE (EDIT) ---
     with tab_edit:
         st.subheader("Update Existing Partner")
         c.execute('SELECT id, name, status, notes FROM partners')
@@ -187,7 +208,6 @@ elif nav == "Manage Partners":
                     st.success(f"Updated status for **{p_name}**!")
                     st.rerun()
 
-    # --- DELETE ---
     with tab_delete:
         st.subheader("Delete Partner")
         c.execute('SELECT id, name FROM partners')
