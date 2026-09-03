@@ -60,7 +60,7 @@ st.sidebar.title("🤝 Partner Intelligence")
 st.sidebar.caption("Workspace for Business Development")
 st.sidebar.success("🌐 Web Discovery: DuckDuckGo\n(Free / No Key Required)")
 
-nav = st.sidebar.radio("Navigation", ["Dashboard", "Find Partners", "All Partners", "Pipeline Board"])
+nav = st.sidebar.radio("Navigation", ["Dashboard", "Find Partners", "All Partners", "Pipeline Board", "Manage Partners"])
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Database Management")
@@ -125,5 +125,85 @@ elif nav == "Pipeline Board":
             matching = [r for r in rows if r[2] == s]
             for m in matching:
                 st.write(f"**{m[0]}** ({m[1]} Priority)")
+
+elif nav == "Manage Partners":
+    st.title("⚙️ Manage Partners (CRUD)")
+    
+    tab_add, tab_edit, tab_delete = st.tabs(["➕ Add New Partner", "✏️ Edit Partner Status", "🗑️ Delete Partner"])
+    
+    # --- CREATE (ADD) ---
+    with tab_add:
+        st.subheader("Add a New Partner")
+        with st.form("add_partner_form", clear_on_submit=True):
+            new_name = st.text_input("Partner Name*")
+            new_industry = st.text_input("Industry", "Technology")
+            new_priority = st.selectbox("Priority", ["High", "Medium", "Low"])
+            new_status = st.selectbox("Status", ["Prospect", "Outreach Sent", "In Discussion"])
+            new_notes = st.text_area("Notes", "Initial discovery entry.")
+            
+            submit_add = st.form_submit_button("Add Partner")
+            if submit_add:
+                if new_name.strip() == "":
+                    st.error("Partner Name is required!")
+                else:
+                    c.execute('''
+                        INSERT INTO partners (name, industry, priority, status, notes)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (new_name.strip(), new_industry.strip(), new_priority, new_status, new_notes.strip()))
+                    conn.commit()
+                    st.success(f"Added **{new_name}** to partners!")
+                    st.rerun()
+
+    # --- UPDATE (EDIT) ---
+    with tab_edit:
+        st.subheader("Update Existing Partner")
+        c.execute('SELECT id, name, status, notes FROM partners')
+        all_partners = c.fetchall()
+        
+        if not all_partners:
+            st.info("No partners in the database to edit.")
+        else:
+            partner_dict = {f"{p[1]} (ID: {p[0]})": p for p in all_partners}
+            selected_label = st.selectbox("Select Partner to Edit", list(partner_dict.keys()))
+            selected_partner = partner_dict[selected_label]
+            
+            p_id, p_name, current_status, current_notes = selected_partner
+            
+            status_options = ["Prospect", "Outreach Sent", "In Discussion"]
+            status_index = status_options.index(current_status) if current_status in status_options else 0
+            
+            with st.form("edit_partner_form"):
+                updated_status = st.selectbox("Pipeline Status", status_options, index=status_index)
+                updated_notes = st.text_area("Notes", value=current_notes)
+                
+                submit_edit = st.form_submit_button("Update Partner")
+                if submit_edit:
+                    c.execute('''
+                        UPDATE partners 
+                        SET status = ?, notes = ?
+                        WHERE id = ?
+                    ''', (updated_status, updated_notes.strip(), p_id))
+                    conn.commit()
+                    st.success(f"Updated status for **{p_name}**!")
+                    st.rerun()
+
+    # --- DELETE ---
+    with tab_delete:
+        st.subheader("Delete Partner")
+        c.execute('SELECT id, name FROM partners')
+        all_partners_del = c.fetchall()
+        
+        if not all_partners_del:
+            st.info("No partners in the database to delete.")
+        else:
+            partner_del_dict = {f"{p[1]} (ID: {p[0]})": p for p in all_partners_del}
+            del_label = st.selectbox("Select Partner to Remove", list(partner_del_dict.keys()))
+            selected_del_partner = partner_del_dict[del_label]
+            
+            if st.button("🚨 Permanently Delete Partner", type="primary"):
+                c.execute('DELETE FROM partners WHERE id = ?', (selected_del_partner[0],))
+                conn.commit()
+                st.success(f"Deleted **{selected_del_partner[1]}** successfully.")
+                st.rerun()
 
 conn.close()
