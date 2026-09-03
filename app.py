@@ -1,40 +1,82 @@
-import streamlit as st
 import sqlite3
+import streamlit as st
 from duckduckgo_search import DDGS
 
-# --- DATABASE SETUP ---
-conn = sqlite3.connect('partners.db', check_same_thread=False)
-c = conn.cursor()
+# --- DATABASE SETUP & SEEDING ---
+DB_NAME = 'partners.db'
 
-c.execute('''
-    CREATE TABLE IF NOT EXISTS partners (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        company_name TEXT UNIQUE,
-        industry TEXT,
-        target_audience TEXT,
-        partnership_type TEXT,
-        status TEXT DEFAULT 'Not Contacted',
-        priority TEXT DEFAULT 'Medium',
-        calculated_score INTEGER DEFAULT 50,
-        notes TEXT
-    )
-''')
-conn.commit()
+def get_db():
+    return sqlite3.connect(DB_NAME)
 
-# --- STREAMLIT UI SETUP ---
-st.set_page_config(page_title="Partner Intelligence Dashboard", layout="wide")
+def init_db():
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS partners (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            industry TEXT,
+            priority TEXT,
+            status TEXT,
+            notes TEXT
+        )
+    ''')
+    conn.commit()
+    
+    # Auto-populate seed data if empty
+    c.execute('SELECT COUNT(*) FROM partners')
+    if c.fetchone()[0] == 0:
+        seed_data = [
+            ("Apex Solutions", "Enterprise Software", "High", "Prospect", "Discovered via web search for SaaS integration."),
+            ("Nexus Systems", "Cloud Infrastructure", "High", "Outreach Sent", "Sent initial partnership inquiry email."),
+            ("Quantum Analytics", "Data & AI", "Medium", "In Discussion", "Scheduled follow-up demo call."),
+            ("Vanguard Labs", "Cybersecurity", "Low", "Prospect", "Potential co-marketing partner.")
+        ]
+        c.executemany('''
+            INSERT INTO partners (name, industry, priority, status, notes)
+            VALUES (?, ?, ?, ?, ?)
+        ''', seed_data)
+        conn.commit()
+    conn.close()
 
+def reset_db():
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('DROP TABLE IF EXISTS partners')
+    conn.commit()
+    conn.close()
+    init_db()
+
+# Initialize DB on load
+init_db()
+
+# --- STREAMLIT UI ---
+st.set_page_config(page_title="Partner Intelligence", page_icon="🤝", layout="wide")
+
+# Sidebar Navigation
 st.sidebar.title("🤝 Partner Intelligence")
 st.sidebar.caption("Workspace for Business Development")
-st.sidebar.success("🌐 Web Discovery: DuckDuckGo (Free / No Key Required)")
+
+# Web Discovery Status Indicator
+st.sidebar.success("🌐 Web Discovery: DuckDuckGo\n(Free / No Key Required)")
 
 nav = st.sidebar.radio("Navigation", ["Dashboard", "Find Partners", "All Partners", "Pipeline Board"])
 
-# --- NAVIGATION ROUTING ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("Database Management")
+if st.sidebar.button("🔄 Reset / Reload Sample Data"):
+    reset_db()
+    st.sidebar.success("Database reset with fresh sample data!")
+    st.rerun()
+
+# --- PAGES ---
+conn = get_db()
+c = conn.cursor()
+
 if nav == "Dashboard":
     st.title("📊 Partner Intelligence Dashboard")
     
-    c.execute("SELECT COUNT(*) FROM partners")
+    c.execute('SELECT COUNT(*) FROM partners')
     total_partners = c.fetchone()[0]
     
     c.execute("SELECT COUNT(*) FROM partners WHERE priority = 'High'")
@@ -45,70 +87,44 @@ if nav == "Dashboard":
     col2.metric("High Priority Candidates", high_priority)
 
 elif nav == "Find Partners":
-    st.title("⌕ Free Live Web Partner Discovery")
-    st.caption("Discover real companies live from DuckDuckGo without API keys.")
-
-    industry = st.text_input("Target Industry", "EdTech")
-    audience = st.text_input("Target Audience", "Data Science Students")
-    p_type = st.selectbox("Partnership Type", ["Co-branding / Joint Certifications", "Content Licensing", "Referral"])
-
-    if st.button("Run Company Discovery"):
-        query = f"top companies in {industry} for {audience}"
-        st.info(f"Searching DuckDuckGo live for: *{query}*...")
-        
-        try:
-            results = []
-            with DDGS() as ddgs:
-                for r in ddgs.text(query, max_results=5):
-                    results.append(r)
-            
-            if results:
-                st.subheader("Discovered Web Results")
-                for item in results:
-                    title = item.get('title', 'Unknown Title')
-                    link = item.get('href', '#')
-                    snippet = item.get('body', '')
-
-                    with st.expander(f"🌐 {title}"):
-                        st.write(f"**URL:** {link}")
-                        st.write(f"**Snippet:** {snippet}")
-                        
-                        comp_name = title.split("-")[0].split("|")[0].strip()
-                        
-                        if st.button(f"Add '{comp_name}' to Pipeline", key=link):
-                            try:
-                                c.execute('''
-                                    INSERT INTO partners (company_name, industry, target_audience, partnership_type, notes)
-                                    VALUES (?, ?, ?, ?, ?)
-                                ''', (comp_name, industry, audience, p_type, snippet[:150] + "..."))
-                                conn.commit()
-                                st.success(f"Added {comp_name} to database!")
-                            except sqlite3.IntegrityError:
-                                st.warning(f"{comp_name} is already in your database.")
-            else:
-                st.warning("No live search results found. Try broadening your keywords.")
-                
-        except Exception as e:
-            st.error(f"Error executing web search: {e}")
+    st.title("🔍 Find Partners (DuckDuckGo)")
+    query = st.text_input("Enter search query (e.g., 'Top AI Startups in Healthcare')", "Top B2B SaaS Startups")
+    
+    if st.button("Search Web"):
+        with st.spinner("Searching..."):
+            try:
+                results = list(DDGS().text(query, max_results=5))
+                for r in results:
+                    st.subheader(r['title'])
+                    st.write(r['body'])
+                    st.caption(r['href'])
+                    st.markdown("---")
+            except Exception as e:
+                st.error(f"Search error: {e}")
 
 elif nav == "All Partners":
-    st.title("📋 All Saved Partners")
-    c.execute("SELECT company_name, industry, target_audience, status, priority FROM partners")
-    data = c.fetchall()
-    if data:
-        st.table(data)
+    st.title("📋 All Partners")
+    c.execute('SELECT name, industry, priority, status, notes FROM partners')
+    rows = c.fetchall()
+    
+    if rows:
+        st.table([{"Name": r[0], "Industry": r[1], "Priority": r[2], "Status": r[3], "Notes": r[4]} for r in rows])
     else:
-        st.info("No partners saved yet. Go to 'Find Partners' to discover and add some!")
+        st.info("No partners found. Use the sidebar to reload sample data!")
 
 elif nav == "Pipeline Board":
     st.title("📌 Pipeline Board")
-    c.execute("SELECT id, company_name, status FROM partners")
-    partners = c.fetchall()
-    for p_id, name, status in partners:
-        col1, col2 = st.columns([3, 1])
-        col1.write(f"**{name}**")
-        new_status = col2.selectbox("Status", ["Not Contacted", "Contacted", "Meeting", "Closed"], index=["Not Contacted", "Contacted", "Meeting", "Closed"].index(status), key=p_id)
-        if new_status != status:
-            c.execute("UPDATE partners SET status = ? WHERE id = ?", (new_status, p_id))
-            conn.commit()
-            st.rerun()
+    c.execute('SELECT name, priority, status FROM partners')
+    rows = c.fetchall()
+    
+    statuses = ["Prospect", "Outreach Sent", "In Discussion"]
+    cols = st.columns(len(statuses))
+    
+    for i, s in enumerate(statuses):
+        with cols[i]:
+            st.subheader(s)
+            matching = [r for r in rows if r[2] == s]
+            for m in matching:
+                st.card if hasattr(st, "card") else st.write(f"**{m[0]}** ({m[1]} Priority)")
+
+conn.close()
